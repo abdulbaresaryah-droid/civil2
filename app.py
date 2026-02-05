@@ -4,7 +4,7 @@ import math
 
 # Page configuration
 st.set_page_config(
-    page_title="RC Section Design - ACI/ECP",
+    page_title="RC Section Design - ACI / ECP",
     page_icon="🏗️",
     layout="wide"
 )
@@ -32,29 +32,16 @@ st.markdown("""
         padding: 5px;
         border-radius: 5px;
     }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.1rem;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.85rem;
-    }
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
-    div[data-testid="column"] {
-        padding: 2px 5px !important;
-    }
-    .element-container {
-        margin-bottom: 0px !important;
-    }
-    .katex {
-        font-size: 0.95em;
-    }
+    div[data-testid="stMetricValue"] { font-size: 1.1rem; }
+    div[data-testid="stMetricLabel"] { font-size: 0.85rem; }
+    .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+    div[data-testid="column"] { padding: 2px 5px !important; }
+    .element-container { margin-bottom: 0px !important; }
+    .katex { font-size: 0.95em; }
     </style>
 """, unsafe_allow_html=True)
 
-# Rebar data table
+# Rebar data table (areas in mm^2)
 rebar_data = {
     6: [28.3, 57, 85, 113, 142, 170, 198, 226, 255],
     8: [50.3, 101, 151, 201, 252, 302, 352, 402, 453],
@@ -73,9 +60,84 @@ rebar_data = {
     50: [1963.5, 3928, 5892, 7856, 9820, 11784, 13748, 15712, 17676]
 }
 
-# Initialize session state with default values
-if 'initialized' not in st.session_state:
+
+# -----------------------------
+# Synced input (number + slider)
+# -----------------------------
+def _init_synced(key: str, default: float):
+    if key not in st.session_state:
+        st.session_state[key] = default
+    num_key = f"{key}__num"
+    sld_key = f"{key}__sld"
+    if num_key not in st.session_state:
+        st.session_state[num_key] = st.session_state[key]
+    if sld_key not in st.session_state:
+        st.session_state[sld_key] = st.session_state[key]
+
+
+def _sync_from_num(key: str):
+    num_key = f"{key}__num"
+    sld_key = f"{key}__sld"
+    v = st.session_state.get(num_key, 0.0)
+    st.session_state[key] = v
+    st.session_state[sld_key] = v  # force slider to match
+
+
+def _sync_from_sld(key: str):
+    num_key = f"{key}__num"
+    sld_key = f"{key}__sld"
+    v = st.session_state.get(sld_key, 0.0)
+    st.session_state[key] = v
+    st.session_state[num_key] = v  # force number to match
+
+
+def synced_control(
+    label: str,
+    key: str,
+    min_value: float,
+    max_value: float,
+    step: float,
+    default: float,
+    unit: str = "",
+    help_text: str | None = None,
+):
+    _init_synced(key, default)
+
+    st.sidebar.markdown(f"**{label}** {unit}".rstrip())
+
+    c1, c2 = st.sidebar.columns([1, 1])
+    with c1:
+        st.number_input(
+            "number",
+            min_value=min_value,
+            max_value=max_value,
+            step=step,
+            key=f"{key}__num",
+            label_visibility="collapsed",
+            help=help_text,
+            on_change=_sync_from_num,
+            args=(key,),
+        )
+    with c2:
+        st.slider(
+            "slider",
+            min_value=min_value,
+            max_value=max_value,
+            step=step,
+            key=f"{key}__sld",
+            label_visibility="collapsed",
+            help=help_text,
+            on_change=_sync_from_sld,
+            args=(key,),
+        )
+
+    return st.session_state[key]
+
+
+# Initialize session state once
+if "initialized" not in st.session_state:
     st.session_state.initialized = True
+    # defaults (can be 0.0 if you prefer forcing user input)
     st.session_state.fy = 420.0
     st.session_state.fcu = 25.0
     st.session_state.Mu = 100.0
@@ -86,328 +148,181 @@ if 'initialized' not in st.session_state:
     st.session_state.jd = 0.90
     st.session_state.beta1 = 0.85
 
-# Reset function
+
+def _set_synced_value(key: str, value: float):
+    st.session_state[key] = value
+    st.session_state[f"{key}__num"] = value
+    st.session_state[f"{key}__sld"] = value
+
+
 def clear_all_inputs():
-    st.session_state.fy = 0.0
-    st.session_state.fcu = 0.0
-    st.session_state.Mu = 0.0
-    st.session_state.b = 0.0
-    st.session_state.h = 0.0
-    st.session_state.cover = 0.0
-    st.session_state.phi = 0.0
-    st.session_state.jd = 0.0
-    st.session_state.beta1 = 0.0
+    for k in ["fy", "fcu", "Mu", "b", "h", "cover", "phi", "jd", "beta1"]:
+        _set_synced_value(k, 0.0)
+    st.rerun()
+
 
 # Title
-st.markdown('<h1 class="main-header">🏗️ RC Section Design (ACI/ECP)</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏗️ RC Section Design (ACI / ECP)</h1>', unsafe_allow_html=True)
 
 # Sidebar
 st.sidebar.header("📊 Input Parameters")
 
-# Design Code Selection
-design_code = st.sidebar.radio(
-    "🌍 Design Code",
-    ["ACI 318", "Egyptian Code (ECP 203)"],
-    help="Select the design code to use"
-)
-
+design_code = st.sidebar.radio("Design Code", ["ACI 318", "Egyptian Code (C1/J method)"])
 st.sidebar.markdown("---")
 
-# Clear button
 if st.sidebar.button("🗑️ Clear All Inputs", type="secondary", use_container_width=True):
     clear_all_inputs()
 
 st.sidebar.markdown("---")
-
-# Helper function for synchronized input - FIXED VERSION
-def sync_input(label, min_val, max_val, step, key, unit="", help_text=None):
-    """Create synchronized number input and slider - SIMPLE APPROACH"""
-    st.sidebar.markdown(f"**{label}** {unit}")
-    
-    col1, col2 = st.sidebar.columns([1, 1])
-    
-    # Get current value
-    if key not in st.session_state:
-        st.session_state[key] = min_val
-    
-    with col1:
-        # Number input
-        num_val = st.number_input(
-            "num",
-            min_value=min_val,
-            max_value=max_val,
-            value=st.session_state[key],
-            step=step,
-            key=f"num_{key}",
-            label_visibility="collapsed",
-            help=help_text
-        )
-    
-    with col2:
-        # Slider
-        slider_val = st.slider(
-            "slider",
-            min_value=min_val,
-            max_value=max_val,
-            value=st.session_state[key],
-            step=step,
-            key=f"slider_{key}",
-            label_visibility="collapsed",
-            help=help_text
-        )
-    
-    # Update session state based on which changed
-    if f"num_{key}" in st.session_state and st.session_state[f"num_{key}"] != st.session_state[key]:
-        st.session_state[key] = st.session_state[f"num_{key}"]
-    elif f"slider_{key}" in st.session_state and st.session_state[f"slider_{key}"] != st.session_state[key]:
-        st.session_state[key] = st.session_state[f"slider_{key}"]
-    
-    return st.session_state[key]
-
-# Material Properties
 st.sidebar.subheader("Material Properties")
 
-fy = sync_input(
-    "Steel Yield Strength, fy",
-    0.0, 600.0, 10.0, "fy", "(MPa)",
-    "Enter steel yield strength"
-)
-
-fcu = sync_input(
-    "Concrete Strength, f'c / fcu",
-    0.0, 50.0, 2.5, "fcu", "(MPa)",
-    "Enter concrete compressive strength"
-)
+fy = synced_control("Steel Yield Strength, fy", "fy", 0.0, 600.0, 10.0, st.session_state.fy, "(MPa)")
+fcu = synced_control("Concrete Strength, f'c / fcu", "fcu", 0.0, 60.0, 2.5, st.session_state.fcu, "(MPa)")
 
 st.sidebar.markdown("---")
-
-# Loading
 st.sidebar.subheader("Loading")
-
-Mu = sync_input(
-    "Ultimate Moment, Mu",
-    0.0, 500.0, 0.5, "Mu", "(kN.m)",
-    "Enter ultimate design moment"
-)
+Mu = synced_control("Ultimate Moment, Mu", "Mu", 0.0, 500.0, 0.5, st.session_state.Mu, "(kN.m)")
 
 st.sidebar.markdown("---")
-
-# Section Dimensions
 st.sidebar.subheader("Section Dimensions")
-
-b = sync_input(
-    "Width, b",
-    0.0, 2000.0, 50.0, "b", "(mm)",
-    "Enter section width"
-)
-
-h = sync_input(
-    "Height, h",
-    0.0, 1000.0, 10.0, "h", "(mm)",
-    "Enter total section height"
-)
-
-cover = sync_input(
-    "Cover",
-    0.0, 75.0, 5.0, "cover", "(mm)",
-    "Enter concrete cover to reinforcement"
-)
+b = synced_control("Width, b", "b", 0.0, 2000.0, 50.0, st.session_state.b, "(mm)")
+h = synced_control("Height, h", "h", 0.0, 1500.0, 10.0, st.session_state.h, "(mm)")
+cover = synced_control("Cover", "cover", 0.0, 100.0, 5.0, st.session_state.cover, "(mm)")
 
 st.sidebar.markdown("---")
-
-# Design Parameters
 st.sidebar.subheader("Design Parameters")
 
 if design_code == "ACI 318":
-    phi = sync_input(
-        "Strength Reduction Factor, φ",
-        0.0, 0.9, 0.05, "phi", "",
-        "ACI strength reduction factor (typically 0.9)"
-    )
-    
-    jd = sync_input(
-        "Moment Arm Factor, jd",
-        0.0, 0.95, 0.01, "jd", "",
-        "Approximate lever arm factor (d-a/2)/d"
-    )
-    
-    beta1 = sync_input(
-        "β₁ Factor",
-        0.0, 0.85, 0.05, "beta1", "",
-        "Stress block factor (typically 0.85 for f'c ≤ 28 MPa)"
-    )
-else:  # Egyptian Code
-    st.sidebar.info("📘 Egyptian Code parameters are calculated automatically")
-    phi = 1.0
-    jd = 0.9
-    beta1 = 0.85
+    phi = synced_control("Strength Reduction Factor, φ", "phi", 0.0, 0.9, 0.05, st.session_state.phi)
+    jd = synced_control("Moment Arm Factor, jd", "jd", 0.0, 0.95, 0.01, st.session_state.jd)
+    beta1 = synced_control("β₁ Factor", "beta1", 0.0, 0.85, 0.05, st.session_state.beta1)
+else:
+    st.sidebar.info("ECP constants (editable)")
+    with st.sidebar.expander("ECP Constants", expanded=False):
+        C1_min = st.number_input("C1 min", min_value=0.0, value=2.76, step=0.01)
+        J_max = st.number_input("J max", min_value=0.0, max_value=1.0, value=0.95, step=0.01)
+        k1 = st.number_input("k1 (in 1/k1)", min_value=0.01, value=1.15, step=0.01)
+        k2 = st.number_input("k2 (in 1/(k2*C1^2))", min_value=0.01, value=0.9, step=0.01)
+else_C1_min = 2.76
+else_J_max = 0.95
+else_k1 = 1.15
+else_k2 = 0.9
 
 # Validation
-all_inputs_valid = all([
-    fy > 0,
-    fcu > 0,
-    Mu > 0,
-    b > 0,
-    h > 0,
-    cover >= 0,
-    h > cover,
-])
-
-if design_code == "ACI 318":
-    all_inputs_valid = all_inputs_valid and phi > 0 and jd > 0 and beta1 > 0
-
-if not all_inputs_valid:
+if not (fy > 0 and fcu > 0 and Mu > 0 and b > 0 and h > 0 and cover >= 0 and h > cover):
     st.warning("⚠️ Please enter all input values to proceed with calculations")
-    st.info("💡 Use the number inputs or sliders to set values")
-    if h <= cover and h > 0 and cover > 0:
-        st.error("❌ Height (h) must be greater than cover")
+    st.info("💡 Make sure: h > cover")
     st.stop()
 
-# ==================== CALCULATIONS ====================
+if design_code == "ACI 318":
+    if not (phi > 0 and jd > 0 and beta1 > 0):
+        st.warning("⚠️ Please enter all design parameters (φ, jd, β₁)")
+        st.stop()
 
+# Calculations
 try:
-    # Common calculations
     d = h - cover
-    
     if d <= 0:
         st.error("❌ Error: Effective depth d = h - cover must be > 0")
         st.stop()
-    
-    Mu_Nmm = Mu * 1e6  # kN.m to N.mm
-    
+
+    Mu_Nmm = Mu * 1e6  # kN.m -> N.mm
+
     calculations = []
-    
-    # ==================== ACI 318 CODE ====================
+
+    # Step 1
+    calculations.append({
+        "step": "1",
+        "description": "Effective Depth",
+        "formula": r"d = h - \text{cover}",
+        "substitution": rf"{h:.0f} - {cover:.0f}",
+        "result": f"{d:.1f} mm",
+        "variable": "d"
+    })
+
     if design_code == "ACI 318":
-        # Step 1: Effective depth
-        calculations.append({
-            'step': '1',
-            'description': 'Effective Depth',
-            'formula': r'd = h - \text{cover}',
-            'substitution': rf'{h:.0f} - {cover:.0f}',
-            'result': f'{d:.1f} mm',
-            'variable': 'd'
-        })
-        
-        # Step 2: Initial As
+        # ACI: same logic as v17
         denominator_initial = phi * fy * jd * d
         if denominator_initial == 0:
             st.error("❌ Error: φ * fy * jd * d cannot be zero")
             st.stop()
-        
+
         As_initial = Mu_Nmm / denominator_initial
-        
+
         calculations.append({
-            'step': '2',
-            'description': 'Initial As',
-            'formula': r'A_s = \frac{M_u}{\phi f_y jd \cdot d}',
-            'substitution': rf'\frac{{{Mu*1e6:.2e}}}{{{phi:.2f} \times {fy:.0f} \times {jd:.2f} \times {d:.1f}}}',
-            'result': f'{As_initial:.1f} mm²',
-            'variable': 'As,init'
+            "step": "2",
+            "description": "Initial As",
+            "formula": r"A_s = \frac{M_u}{\phi f_y jd \cdot d}",
+            "substitution": rf"\frac{{{Mu_Nmm:.2e}}}{{{phi:.2f} \times {fy:.0f} \times {jd:.2f} \times {d:.1f}}}",
+            "result": f"{As_initial:.1f} mm²",
+            "variable": "As,init"
         })
-        
-        # Step 3: Depth of block
+
         denominator_a = 0.85 * fcu * b
         if denominator_a == 0:
             st.error("❌ Error: 0.85 * f'c * b cannot be zero")
             st.stop()
-        
+
         a_initial = (As_initial * fy) / denominator_a
-        
+
         calculations.append({
-            'step': '3',
-            'description': 'Depth of Block',
-            'formula': r"a = \frac{A_s f_y}{0.85 f'_c b}",
-            'substitution': rf'\frac{{{As_initial:.1f} \times {fy:.0f}}}{{0.85 \times {fcu:.1f} \times {b:.0f}}}',
-            'result': f'{a_initial:.2f} mm',
-            'variable': 'a'
+            "step": "3",
+            "description": "Depth of Block",
+            "formula": r"a = \frac{A_s f_y}{0.85 f'_c b}",
+            "substitution": rf"\frac{{{As_initial:.1f} \times {fy:.0f}}}{{0.85 \times {fcu:.1f} \times {b:.0f}}}",
+            "result": f"{a_initial:.2f} mm",
+            "variable": "a"
         })
-        
-        # Step 4: Refined As
-        lever_arm = d - a_initial/2
+
+        lever_arm = d - a_initial / 2.0
         if lever_arm <= 0:
             st.error("❌ Error: Lever arm (d - a/2) must be > 0")
             st.stop()
-        
+
         As_calculated = Mu_Nmm / (phi * fy * lever_arm)
-        
+
         calculations.append({
-            'step': '4',
-            'description': 'Refined As',
-            'formula': r'A_s = \frac{M_u}{\phi f_y (d - a/2)}',
-            'substitution': rf'\frac{{{Mu*1e6:.2e}}}{{{phi:.2f} \times {fy:.0f} \times ({d:.1f} - {a_initial/2:.2f})}}',
-            'result': f'{As_calculated:.1f} mm²',
-            'variable': 'As,calc'
+            "step": "4",
+            "description": "Refined As",
+            "formula": r"A_s = \frac{M_u}{\phi f_y (d - a/2)}",
+            "substitution": rf"\frac{{{Mu_Nmm:.2e}}}{{{phi:.2f} \times {fy:.0f} \times ({d:.1f} - {a_initial/2.0:.2f})}}",
+            "result": f"{As_calculated:.1f} mm²",
+            "variable": "As,calc"
         })
-        
-        # Step 5: Minimum steel
+
         As_min_1 = (0.25 * math.sqrt(fcu) / fy) * b * d
         As_min_2 = (1.4 / fy) * b * d
         As_min = max(As_min_1, As_min_2)
-        
+
         calculations.append({
-            'step': '5',
-            'description': 'Minimum As',
-            'formula': r'A_{s,min} = \max\left(\frac{0.25\sqrt{f_c^\prime}}{f_y}b_w d, \frac{1.4}{f_y}b_w d\right)',
-            'substitution': rf'\max\left(\frac{{0.25 \times {math.sqrt(fcu):.2f}}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}, \frac{{1.4}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}\right)',
-            'result': f'{As_min:.1f} mm²',
-            'variable': 'As,min'
+            "step": "5",
+            "description": "Minimum As",
+            "formula": r"A_{s,min} = \max\left(\frac{0.25\sqrt{f_c^\prime}}{f_y}b_w d, \frac{1.4}{f_y}b_w d\right)",
+            "substitution": rf"\max\left(\frac{{0.25 \times {math.sqrt(fcu):.2f}}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}, \frac{{1.4}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}\right)",
+            "result": f"{As_min:.1f} mm²",
+            "variable": "As,min"
         })
-        
-        # Step 6: Required As
+
         As_required = max(As_calculated, As_min)
-        governing = "minimum" if As_required == As_min else "calculated"
-        
+        governing = "minimum" if abs(As_required - As_min) < 1e-9 else "calculated"
+
         calculations.append({
-            'step': '6',
-            'description': 'Required As',
-            'formula': r'A_{s,req} = \max(A_s, A_{s,min})',
-            'substitution': rf'\max({As_calculated:.1f}, {As_min:.1f})',
-            'result': f'{As_required:.1f} mm² ({governing})',
-            'variable': 'As,req'
+            "step": "6",
+            "description": "Required As",
+            "formula": r"A_{s,req} = \max(A_s, A_{s,min})",
+            "substitution": rf"\max({As_calculated:.1f}, {As_min:.1f})",
+            "result": f"{As_required:.1f} mm² ({governing})",
+            "variable": "As,req"
         })
-        
-        # Step 7: Final a
+
         a_final = (As_required * fy) / denominator_a
-        
-        calculations.append({
-            'step': '7',
-            'description': 'Final a',
-            'formula': r"a = \frac{A_{s,req} f_y}{0.85 f'_c b}",
-            'substitution': rf'\frac{{{As_required:.1f} \times {fy:.0f}}}{{0.85 \times {fcu:.1f} \times {b:.0f}}}',
-            'result': f'{a_final:.2f} mm',
-            'variable': 'a,final'
-        })
-        
-        # Step 8: Neutral axis
         c = a_final / beta1
-        
-        calculations.append({
-            'step': '8',
-            'description': 'Neutral Axis',
-            'formula': r'c = \frac{a}{\beta_1}',
-            'substitution': rf'\frac{{{a_final:.2f}}}{{{beta1:.2f}}}',
-            'result': f'{c:.2f} mm',
-            'variable': 'c'
-        })
-        
-        # Step 9: Steel strain
         if c <= 0:
             st.error("❌ Error: Neutral axis depth c must be > 0")
             st.stop()
-        
+
         es = ((d - c) / c) * 0.003
-        
-        calculations.append({
-            'step': '9',
-            'description': 'Steel Strain',
-            'formula': r'\varepsilon_s = \frac{d-c}{c} \times 0.003',
-            'substitution': rf'\frac{{{d:.1f} - {c:.2f}}}{{{c:.2f}}} \times 0.003',
-            'result': f'{es:.5f}',
-            'variable': 'εs'
-        })
-        
-        # Step 10: Check strain
+
         strain_safe = es >= 0.002
         if es >= 0.005:
             strain_status = "Tension ✓"
@@ -415,510 +330,342 @@ try:
             strain_status = "Transition ⚠"
         else:
             strain_status = "Compression ✗"
-        
-        calculations.append({
-            'step': '10',
-            'description': 'Check εs',
-            'formula': r'\varepsilon_s \geq 0.002',
-            'substitution': f'{es:.5f} ≥ 0.002',
-            'result': f'{"PASS ✓" if strain_safe else "FAIL ✗"} ({strain_status})',
-            'variable': 'Check'
-        })
-        
-        # Step 11: Design capacity
-        phi_Mn_Nmm = phi * As_required * fy * (d - a_final/2)
-        phi_Mn = phi_Mn_Nmm / 1e6
-        
-        calculations.append({
-            'step': '11',
-            'description': 'Design Capacity',
-            'formula': r'\phi M_n = \phi A_{s,req} f_y (d - a/2)',
-            'substitution': rf'{phi:.2f} \times {As_required:.1f} \times {fy:.0f} \times ({d:.1f} - {a_final/2:.2f})',
-            'result': f'{phi_Mn:.2f} kN.m',
-            'variable': 'φMn'
-        })
-        
-        # Step 12: Capacity check
+
+        phi_Mn_Nmm = phi * As_required * fy * (d - a_final / 2.0)
+        phi_Mn = phi_Mn_Nmm / 1e6  # -> kN.m
+
         capacity_safe = phi_Mn >= Mu
-        utilization = (Mu / phi_Mn) * 100 if phi_Mn > 0 else 0
-        
+        utilization = (Mu / phi_Mn) * 100.0 if phi_Mn > 0 else 0.0
+
         calculations.append({
-            'step': '12',
-            'description': 'Capacity Check',
-            'formula': r'\phi M_n \geq M_u',
-            'substitution': f'{phi_Mn:.2f} ≥ {Mu:.2f}',
-            'result': f'{"SAFE ✓" if capacity_safe else "UNSAFE ✗"} ({utilization:.1f}%)',
-            'variable': 'Check'
+            "step": "7",
+            "description": "Design Capacity",
+            "formula": r"\phi M_n = \phi A_{s,req} f_y (d - a/2)",
+            "substitution": rf"{phi:.2f} \times {As_required:.1f} \times {fy:.0f} \times ({d:.1f} - {a_final/2.0:.2f})",
+            "result": f"{phi_Mn:.2f} kN.m",
+            "variable": "φMn"
         })
-    
-    # ==================== EGYPTIAN CODE - FIXED ====================
-    else:  # Egyptian Code (ECP 203)
-        # Step 1: Effective depth
+
         calculations.append({
-            'step': '1',
-            'description': 'Effective Depth',
-            'formula': r'd = h - \text{cover}',
-            'substitution': rf'{h:.0f} - {cover:.0f}',
-            'result': f'{d:.1f} mm',
-            'variable': 'd'
+            "step": "8",
+            "description": "Capacity Check",
+            "formula": r"\phi M_n \geq M_u",
+            "substitution": f"{phi_Mn:.2f} ≥ {Mu:.2f}",
+            "result": f'{"SAFE ✓" if capacity_safe else "UNSAFE ✗"} ({utilization:.1f}%)',
+            "variable": "Check"
         })
-        
-        # Step 2: Calculate C1 - FIXED with correct units
-        # Mu in N.mm, fcu in MPa, b in mm, d in mm
-        # C1 = Mu / (fcu * b * d^2) but we need to convert to correct units
-        # Mu (N.mm) / (fcu (N/mm²) * b (mm) * d² (mm²)) = dimensionless
-        
-        C1_from_moment = Mu_Nmm / (fcu * b * d * d)
-        
-        calculations.append({
-            'step': '2',
-            'description': 'Calculate C₁',
-            'formula': r'C_1 = \frac{M_u}{f_{cu} \cdot b \cdot d^2}',
-            'substitution': rf'\frac{{{Mu_Nmm:.2e}}}{{{fcu:.1f} \times {b:.0f} \times {d:.1f}^2}}',
-            'result': f'{C1_from_moment:.4f}',
-            'variable': 'C₁'
-        })
-        
-        # Step 3: Check C1 minimum
-        C1_min = 2.76
-        C1_check = C1_from_moment <= C1_min
-        
-        calculations.append({
-            'step': '3',
-            'description': 'Check C₁',
-            'formula': r'C_1 \leq C_{1,min} = 2.76',
-            'substitution': f'{C1_from_moment:.4f} ≤ {C1_min}',
-            'result': f'{"PASS ✓" if C1_check else "FAIL ✗ (Over-reinforced)"}',
-            'variable': 'Check'
-        })
-        
-        if not C1_check:
-            st.error(f"❌ Error: C₁ = {C1_from_moment:.4f} > 2.76. Section is over-reinforced. Increase section size or reduce moment.")
+
+    else:
+        # ECP: C1/J method per your screenshot
+        C1_min = st.session_state.get("C1_min_runtime", None)
+        # read constants from expander values if present; otherwise defaults
+        # (Streamlit keeps those widget values directly as local variables in this run)
+        C1_min = locals().get("C1_min", else_C1_min)
+        J_max = locals().get("J_max", else_J_max)
+        k1 = locals().get("k1", else_k1)
+        k2 = locals().get("k2", else_k2)
+
+        # C1 = d / sqrt(Mu/(fcu*b))
+        denom = fcu * b
+        if denom <= 0:
+            st.error("❌ Error: fcu * b must be > 0")
             st.stop()
-        
-        # Step 4: Calculate J (lever arm factor) - FIXED
-        # J = (1/1.15) * (0.5 + √(0.25 - C1/(0.9*fcu*b*d²)) )
-        # But actually the formula should be based on stress coefficients
-        # Let me use the standard formula: J = 1 - 0.4 * (x/d)
-        # where x/d = (Es/Ec) * ... this gets complex
-        
-        # Simpler approach - use the relationship:
-        # ω = As*fy/(fcu*b*d)
-        # J ≈ 1 - 0.4*ω for small ω
-        
-        # Let's use iterative approach or the direct formula:
-        # For Egyptian Code: C1 is related to the moment coefficient
-        # J can be found from: C1 = J * (1 - 0.4*J*fy/(1.15*fcu))
-        
-        # Simplified: use quadratic formula
-        # Let's assume J based on typical values for now
-        # Better formula: J = (1.15/fy) * d * √(2*fcu*C1)
-        
-        # Actually, let's use the correct formula from ECP:
-        # μ = Mu/(fcu * b * d²) = C1
-        # J = 0.5 + √(0.25 - μ/1.087)  for under-reinforced sections
-        
-        mu = C1_from_moment
-        discriminant = 0.25 - mu/1.087
-        
-        if discriminant < 0:
-            st.error(f"❌ Error: Section is over-reinforced (discriminant = {discriminant:.4f}). Increase section size or reduce moment.")
+
+        inside = Mu_Nmm / denom  # mm^2
+        if inside <= 0:
+            st.error("❌ Error: Mu/(fcu*b) must be > 0")
             st.stop()
-        
-        J_calculated = 0.5 + math.sqrt(discriminant)
-        
+
+        C1 = d / math.sqrt(inside)
+
         calculations.append({
-            'step': '4',
-            'description': 'Calculate J',
-            'formula': r'J = 0.5 + \sqrt{0.25 - \frac{\mu}{1.087}}',
-            'substitution': rf'0.5 + \sqrt{{0.25 - \frac{{{mu:.4f}}}{{1.087}}}}',
-            'result': f'{J_calculated:.4f}',
-            'variable': 'J'
+            "step": "2",
+            "description": "C1 (ECP)",
+            "formula": r"C_1 = \frac{d}{\sqrt{\frac{M_u}{f_{cu}\,b}}}",
+            "substitution": rf"\frac{{{d:.1f}}}{{\sqrt{{\frac{{{Mu_Nmm:.2e}}}{{{fcu:.1f}\times {b:.0f}}}}}}}",
+            "result": f"{C1:.3f}",
+            "variable": "C1"
         })
-        
-        # Step 5: J max check
-        J_max = 0.95
-        J_used = min(J_calculated, J_max)
-        
+
+        C1_ok = C1 >= C1_min
         calculations.append({
-            'step': '5',
-            'description': 'Check J max',
-            'formula': r'J \leq J_{max} = 0.95',
-            'substitution': f'{J_calculated:.4f} ≤ {J_max}',
-            'result': f'{J_used:.4f} ({"used" if J_used == J_calculated else "limited to J_max"})',
-            'variable': 'J_used'
+            "step": "3",
+            "description": "C1 Check",
+            "formula": r"C_1 \geq C_{1,\min}",
+            "substitution": f"{C1:.3f} ≥ {C1_min:.2f}",
+            "result": "PASS ✓" if C1_ok else "FAIL ✗",
+            "variable": "Check"
         })
-        
-        # Step 6: Calculate required As
-        # As = Mu / (fy * J * d)  - using design strength
-        # For Egyptian Code, use fy/1.15 for design
-        
-        As_calculated = Mu_Nmm / ((fy/1.15) * J_used * d)
-        
+
+        if not C1_ok:
+            st.error(
+                f"❌ Error: C1 = {C1:.3f} < C1min = {C1_min:.2f}. "
+                "Section is over-reinforced by this method. Reduce Mu or increase b/h (increase d)."
+            )
+            st.stop()
+
+        # J = (1/k1) * (0.5 + sqrt(0.25 - 1/(k2*C1^2)))
+        disc = 0.25 - 1.0 / (k2 * (C1 ** 2))
+        if disc < 0:
+            st.error(
+                f"❌ Error: sqrt term negative (disc={disc:.4f}). "
+                "Increase section or reduce Mu."
+            )
+            st.stop()
+
+        J_raw = (1.0 / k1) * (0.5 + math.sqrt(disc))
+        J = min(J_raw, J_max)
+
         calculations.append({
-            'step': '6',
-            'description': 'Calculate As',
-            'formula': r'A_s = \frac{M_u}{(f_y/1.15) \cdot J \cdot d}',
-            'substitution': rf'\frac{{{Mu_Nmm:.2e}}}{{({fy:.0f}/1.15) \times {J_used:.4f} \times {d:.1f}}}',
-            'result': f'{As_calculated:.1f} mm²',
-            'variable': 'As,calc'
+            "step": "4",
+            "description": "J (ECP)",
+            "formula": r"J=\frac{1}{k_1}\left(0.5+\sqrt{0.25-\frac{1}{k_2\,C_1^2}}\right)",
+            "substitution": rf"\frac{{1}}{{{k1:.2f}}}\left(0.5+\sqrt{{0.25-\frac{{1}}{{{k2:.2f}\times {C1:.3f}^2}}}}\right)",
+            "result": f"{J_raw:.4f}",
+            "variable": "J"
         })
-        
-        # Step 7: Minimum steel (Egyptian Code)
+
+        calculations.append({
+            "step": "5",
+            "description": "J used",
+            "formula": r"J=\min(J, J_{max})",
+            "substitution": f"min({J_raw:.4f}, {J_max:.2f})",
+            "result": f"{J:.4f}",
+            "variable": "J_used"
+        })
+
+        # As = Mu / (fy * J * d)
+        denom_As = fy * J * d
+        if denom_As <= 0:
+            st.error("❌ Error: fy * J * d must be > 0")
+            st.stop()
+
+        As_calculated = Mu_Nmm / denom_As
+
+        calculations.append({
+            "step": "6",
+            "description": "As (ECP)",
+            "formula": r"A_s=\frac{M_u}{f_y\,J\,d}",
+            "substitution": rf"\frac{{{Mu_Nmm:.2e}}}{{{fy:.0f}\times {J:.4f}\times {d:.1f}}}",
+            "result": f"{As_calculated:.1f} mm²",
+            "variable": "As,calc"
+        })
+
+        # Minimum steel (kept from prior version; adjust if you have exact clause)
         As_min_1 = (0.6 / fy) * b * d
         As_min_2 = (0.225 * math.sqrt(fcu) / fy) * b * d
         As_min = max(As_min_1, As_min_2)
-        
-        calculations.append({
-            'step': '7',
-            'description': 'Minimum As (ECP)',
-            'formula': r'A_{s,min} = \max\left(\frac{0.6}{f_y}bd, \frac{0.225\sqrt{f_{cu}}}{f_y}bd\right)',
-            'substitution': rf'\max\left(\frac{{0.6}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}, \frac{{0.225 \times {math.sqrt(fcu):.2f}}}{{{fy:.0f}}} \times {b:.0f} \times {d:.1f}\right)',
-            'result': f'{As_min:.1f} mm²',
-            'variable': 'As,min'
-        })
-        
-        # Step 8: Required As
-        As_required = max(As_calculated, As_min)
-        governing = "minimum" if As_required == As_min else "calculated"
-        
-        calculations.append({
-            'step': '8',
-            'description': 'Required As',
-            'formula': r'A_{s,req} = \max(A_s, A_{s,min})',
-            'substitution': rf'\max({As_calculated:.1f}, {As_min:.1f})',
-            'result': f'{As_required:.1f} mm² ({governing})',
-            'variable': 'As,req'
-        })
-        
-        # Step 9: Calculate actual neutral axis
-        # x = As * fy / (0.67 * fcu * b) for ultimate limit state
-        # Using safety factor: fy/1.15 and fcu/1.5
-        
-        x = (As_required * (fy/1.15)) / ((fcu/1.5) * b)
-        
-        calculations.append({
-            'step': '9',
-            'description': 'Neutral Axis Depth',
-            'formula': r'x = \frac{A_s \cdot (f_y/\gamma_s)}{(f_{cu}/\gamma_c) \cdot b}',
-            'substitution': rf'\frac{{{As_required:.1f} \times ({fy:.0f}/1.15)}}{{({fcu:.1f}/1.5) \times {b:.0f}}}',
-            'result': f'{x:.2f} mm',
-            'variable': 'x'
-        })
-        
-        # Step 10: Check x/d ratio
-        x_d_ratio = x / d
-        x_d_limit = 0.45
-        x_d_safe = x_d_ratio <= x_d_limit
-        
-        calculations.append({
-            'step': '10',
-            'description': 'Check x/d ratio',
-            'formula': r'\frac{x}{d} \leq 0.45',
-            'substitution': f'{x_d_ratio:.3f} ≤ {x_d_limit}',
-            'result': f'{"PASS ✓" if x_d_safe else "FAIL ✗ (Over-reinforced)"}',
-            'variable': 'Check'
-        })
-        
-        # Step 11: Calculate design capacity
-        # Mn = As * (fy/1.15) * (d - 0.4*x)
-        
-        Mn_Nmm = As_required * (fy/1.15) * (d - 0.4 * x)
-        Mn = Mn_Nmm / 1e6
-        
-        calculations.append({
-            'step': '11',
-            'description': 'Design Capacity',
-            'formula': r'M_n = A_s \cdot (f_y/1.15) \cdot (d - 0.4x)',
-            'substitution': rf'{As_required:.1f} \times ({fy:.0f}/1.15) \times ({d:.1f} - 0.4 \times {x:.2f})',
-            'result': f'{Mn:.2f} kN.m',
-            'variable': 'Mn'
-        })
-        
-        # Step 12: Capacity check (no additional safety factor needed as already included)
-        capacity_safe = Mn >= Mu
-        utilization = (Mu / Mn) * 100 if Mn > 0 else 0
-        
-        calculations.append({
-            'step': '12',
-            'description': 'Capacity Check',
-            'formula': r'M_n \geq M_u',
-            'substitution': f'{Mn:.2f} ≥ {Mu:.2f}',
-            'result': f'{"SAFE ✓" if capacity_safe else "UNSAFE ✗"} ({utilization:.1f}%)',
-            'variable': 'Check'
-        })
-        
-        # Set variables for later use
-        strain_safe = x_d_safe
-        strain_status = "Within limits ✓" if x_d_safe else "Over-reinforced ✗"
-        phi_Mn = Mn
-        c = x
-        es = 0.003 * (d - x) / x if x > 0 else 0
-        a_final = x
-        gamma_s = 1.15
-        Mu_design = Mu
 
-except ZeroDivisionError:
-    st.error("❌ Calculation Error: Division by zero detected. Please check your inputs.")
-    st.stop()
+        calculations.append({
+            "step": "7",
+            "description": "Minimum As (ECP)",
+            "formula": r"A_{s,\min}=\max\left(\frac{0.6}{f_y}bd,\frac{0.225\sqrt{f_{cu}}}{f_y}bd\right)",
+            "substitution": rf"\max\left(\frac{{0.6}}{{{fy:.0f}}}\times {b:.0f}\times {d:.1f}, \frac{{0.225\times {math.sqrt(fcu):.2f}}}{{{fy:.0f}}}\times {b:.0f}\times {d:.1f}\right)",
+            "result": f"{As_min:.1f} mm²",
+            "variable": "As,min"
+        })
+
+        As_required = max(As_calculated, As_min)
+        governing = "minimum" if abs(As_required - As_min) < 1e-9 else "calculated"
+
+        calculations.append({
+            "step": "8",
+            "description": "Required As",
+            "formula": r"A_{s,req}=\max(A_s,A_{s,\min})",
+            "substitution": rf"\max({As_calculated:.1f}, {As_min:.1f})",
+            "result": f"{As_required:.1f} mm² ({governing})",
+            "variable": "As,req"
+        })
+
+        # Capacity by same method: Mn = As * fy * J * d
+        Mn = (As_required * fy * J * d) / 1e6  # kN.m
+        capacity_safe = Mn >= Mu
+        utilization = (Mu / Mn) * 100.0 if Mn > 0 else 0.0
+
+        calculations.append({
+            "step": "9",
+            "description": "Moment Capacity (ECP)",
+            "formula": r"M_n=A_s f_y J d",
+            "substitution": rf"{As_required:.1f}\times {fy:.0f}\times {J:.4f}\times {d:.1f}",
+            "result": f"{Mn:.2f} kN.m",
+            "variable": "Mn"
+        })
+
+        calculations.append({
+            "step": "10",
+            "description": "Capacity Check",
+            "formula": r"M_n \geq M_u",
+            "substitution": f"{Mn:.2f} ≥ {Mu:.2f}",
+            "result": f'{"SAFE ✓" if capacity_safe else "UNSAFE ✗"} ({utilization:.1f}%)',
+            "variable": "Check"
+        })
+
+        # For unified summary display
+        es = None
+        c = None
+        strain_safe = C1_ok
+        strain_status = "OK" if C1_ok else "FAIL"
+        phi_Mn = Mn  # reuse display variable name
+
 except Exception as e:
     st.error(f"❌ Calculation Error: {str(e)}")
     st.stop()
-
-# ==================== DISPLAY RESULTS ====================
 
 # Input Summary
 st.markdown('<h2 class="section-header">📋 Input Summary</h2>', unsafe_allow_html=True)
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Design Code", design_code.split()[0])
+    st.metric("Code", "ACI" if design_code == "ACI 318" else "ECP")
     st.metric("Mu", f"{Mu:.2f} kN.m")
 with col2:
     st.metric("b", f"{b:.0f} mm")
     st.metric("h", f"{h:.0f} mm")
 with col3:
     st.metric("cover", f"{cover:.0f} mm")
-    st.metric("fy", f"{fy:.0f} MPa")
+    st.metric("d", f"{d:.1f} mm")
 with col4:
-    st.metric("f'c/fcu", f"{fcu:.1f} MPa")
-    if design_code == "ACI 318":
-        st.metric("φ", f"{phi:.2f}")
+    st.metric("fy", f"{fy:.0f} MPa")
+    st.metric("fcu", f"{fcu:.1f} MPa")
 
-# Calculations Display
+# Calculations
 st.markdown('<h2 class="section-header">🔢 Calculations</h2>', unsafe_allow_html=True)
-
 for calc in calculations:
-    col1, col2, col3, col4 = st.columns([0.4, 2.5, 2.5, 1.6])
-    
-    with col1:
+    c1, c2, c3, c4 = st.columns([0.4, 2.5, 2.5, 1.6])
+    with c1:
         st.markdown(f"**{calc['step']}**")
-    
-    with col2:
+    with c2:
         st.markdown(f"**{calc['description']}:** ${calc['formula']}$")
-    
-    with col3:
-        st.latex(calc['substitution'])
-    
-    with col4:
-        if 'PASS' in calc['result'] or 'SAFE' in calc['result']:
-            st.success(calc['result'])
-        elif 'FAIL' in calc['result'] or 'UNSAFE' in calc['result']:
-            st.error(calc['result'])
+    with c3:
+        st.latex(calc["substitution"])
+    with c4:
+        if "PASS" in calc["result"] or "SAFE" in calc["result"]:
+            st.success(calc["result"])
+        elif "FAIL" in calc["result"] or "UNSAFE" in calc["result"]:
+            st.error(calc["result"])
         else:
             st.info(f"**{calc['result']}**")
 
 # Summary
 st.markdown("---")
 st.markdown('<h2 class="section-header">✅ Design Summary</h2>', unsafe_allow_html=True)
-
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.markdown("**📏 Required Steel Area**")
+    st.markdown("**Required Steel Area**")
     st.metric("As Required", f"{As_required:.1f} mm²")
-    st.metric("Effective Depth", f"{d:.1f} mm")
 
 with col2:
-    st.markdown("**🔍 Analysis**")
+    st.markdown("**Analysis**")
     if design_code == "ACI 318":
-        st.metric("Neutral Axis (c)", f"{c:.2f} mm")
-        st.metric("c/d ratio", f"{(c/d):.3f}")
         st.metric("Steel Strain (εs)", f"{es:.5f}")
         st.metric("Section Type", strain_status)
     else:
-        st.metric("Neutral Axis (x)", f"{x:.2f} mm")
-        st.metric("x/d ratio", f"{x_d_ratio:.3f}")
-        st.metric("Lever Arm (J)", f"{J_used:.4f}")
-        st.metric("Section Status", strain_status)
+        # pull last computed C1/J from calculations list
+        # (safe enough; these exist in ECP branch)
+        st.metric("C1", next(x["result"] for x in calculations if x["variable"] == "C1"))
+        st.metric("J used", next(x["result"] for x in calculations if x["variable"] == "J_used"))
+        st.metric("Status", "OK" if strain_safe else "FAIL")
 
 with col3:
-    st.markdown("**✅ Safety Status**")
+    st.markdown("**Safety Status**")
     overall_safe = strain_safe and capacity_safe
-    
     if overall_safe:
-        st.success("### ✅ DESIGN IS SAFE")
+        st.success("DESIGN IS SAFE")
     else:
-        st.error("### ❌ DESIGN FAILED")
-    
-    st.markdown("**Checks:**")
-    if design_code == "ACI 318":
-        st.markdown(f"{'✅' if strain_safe else '❌'} Steel Strain: {es:.5f} {'≥' if strain_safe else '<'} 0.002")
-        st.markdown(f"{'✅' if capacity_safe else '❌'} Capacity: φMn={phi_Mn:.2f} {'≥' if capacity_safe else '<'} Mu={Mu:.2f}")
-    else:
-        st.markdown(f"{'✅' if x_d_safe else '❌'} x/d ratio: {x_d_ratio:.3f} {'≤' if x_d_safe else '>'} 0.45")
-        st.markdown(f"{'✅' if capacity_safe else '❌'} Capacity: Mn={Mn:.2f} {'≥' if capacity_safe else '<'} Mu={Mu:.2f}")
-    st.markdown(f"{'✅' if As_required >= As_min else '❌'} Minimum Steel")
-    
-    if design_code == "ACI 318":
-        st.metric("Capacity Ratio", f"{phi_Mn/Mu:.2f}")
-    else:
-        st.metric("Capacity Ratio", f"{Mn/Mu:.2f}")
+        st.error("DESIGN FAILED")
+    st.metric("Utilization", f"{utilization:.1f}%")
 
 # Reinforcement Selection Section
 st.markdown("---")
 st.markdown('<h2 class="section-header">🔧 Reinforcement Selection</h2>', unsafe_allow_html=True)
 
 # Auto suggestions
-st.markdown("### 💡 Automatic Suggestions")
+st.markdown("### Automatic Suggestions")
 col1, col2, col3 = st.columns(3)
 
 suggestion_count = 0
 for diameter in [10, 12, 14, 16, 18, 20, 22, 25]:
     area_per_bar = rebar_data[diameter][0]
     num_bars = math.ceil(As_required / area_per_bar)
-    
+
     if num_bars <= 9 and suggestion_count < 6:
         total_area = rebar_data[diameter][num_bars - 1]
         excess = ((total_area - As_required) / As_required) * 100
-        
-        if suggestion_count % 3 == 0:
-            with col1:
-                st.info(f"**{num_bars}Ø{diameter}**\nAs = {total_area:.0f} mm²\n(+{excess:.1f}%)")
-        elif suggestion_count % 3 == 1:
-            with col2:
-                st.info(f"**{num_bars}Ø{diameter}**\nAs = {total_area:.0f} mm²\n(+{excess:.1f}%)")
-        else:
-            with col3:
-                st.info(f"**{num_bars}Ø{diameter}**\nAs = {total_area:.0f} mm²\n(+{excess:.1f}%)")
-        
+
+        target_col = [col1, col2, col3][suggestion_count % 3]
+        with target_col:
+            st.info(f"**{num_bars}Ø{diameter}**\nAs = {total_area:.0f} mm²\n(+{excess:.1f}%)")
         suggestion_count += 1
 
 # Manual Selection
 st.markdown("---")
-st.markdown("### 🎯 Manual Selection & Verification")
+st.markdown("### Manual Selection & Verification")
 
-col1, col2, col3 = st.columns([1, 1, 2])
+c1, c2, c3 = st.columns([1, 1, 2])
+with c1:
+    selected_diameter = st.selectbox("Bar Diameter (mm)", options=list(rebar_data.keys()), index=list(rebar_data.keys()).index(16))
+with c2:
+    selected_num_bars = st.selectbox("Number of Bars", options=list(range(1, 10)), index=3)
 
-with col1:
-    selected_diameter = st.selectbox(
-        "Bar Diameter (mm)",
-        options=list(rebar_data.keys()),
-        index=list(rebar_data.keys()).index(16)
-    )
-
-with col2:
-    selected_num_bars = st.selectbox(
-        "Number of Bars",
-        options=list(range(1, 10)),
-        index=3
-    )
-
-# Get selected reinforcement area
 selected_As = rebar_data[selected_diameter][selected_num_bars - 1]
 
-# Verify selected reinforcement
 st.markdown("---")
-st.markdown("### ✅ Selected Reinforcement Verification")
+st.markdown("### Selected Reinforcement Verification")
 
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
+c1, c2, c3, c4 = st.columns(4)
+with c1:
     st.metric("Selected Config", f"{selected_num_bars}Ø{selected_diameter}")
-
-with col2:
+with c2:
     st.metric("Provided As", f"{selected_As:.1f} mm²")
     excess_percentage = ((selected_As - As_required) / As_required) * 100
     st.caption(f"Excess: {excess_percentage:+.1f}%")
-
-with col3:
+with c3:
     check_As = selected_As >= As_required
     if check_As:
         st.success(f"✓ As Check\n{selected_As:.0f} ≥ {As_required:.0f}")
     else:
         st.error(f"✗ As Check\n{selected_As:.0f} < {As_required:.0f}")
-
-with col4:
-    # Re-calculate capacity with selected As
+with c4:
     if design_code == "ACI 318":
         a_selected = (selected_As * fy) / (0.85 * fcu * b)
         c_selected = a_selected / beta1
         es_selected = ((d - c_selected) / c_selected) * 0.003
-        phi_Mn_selected = (phi * selected_As * fy * (d - a_selected/2)) / 1e6
+        phi_Mn_selected = (phi * selected_As * fy * (d - a_selected / 2.0)) / 1e6
         check_capacity = phi_Mn_selected >= Mu
-        capacity_display = phi_Mn_selected
-    else:  # Egyptian Code
-        x_selected = (selected_As * (fy/1.15)) / ((fcu/1.5) * b)
-        Mn_selected = (selected_As * (fy/1.15) * (d - 0.4 * x_selected)) / 1e6
+        if check_capacity:
+            st.success(f"✓ Capacity Check\nφMn = {phi_Mn_selected:.2f} kN.m")
+        else:
+            st.error(f"✗ Capacity Check\nφMn = {phi_Mn_selected:.2f} kN.m")
+    else:
+        # ECP capacity with same J used for the section
+        # (J already computed in calculations list)
+        J_used_val = float(next(x["result"] for x in calculations if x["variable"] == "J_used"))
+        Mn_selected = (selected_As * fy * J_used_val * d) / 1e6
         check_capacity = Mn_selected >= Mu
-        capacity_display = Mn_selected
-    
-    if check_capacity:
-        st.success(f"✓ Capacity Check\nMn = {capacity_display:.2f} kN.m")
-    else:
-        st.error(f"✗ Capacity Check\nMn = {capacity_display:.2f} kN.m")
-
-# Detailed verification
-st.markdown("---")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("**📊 Analysis with Selected Steel**")
-    if design_code == "ACI 318":
-        st.metric("a (selected)", f"{a_selected:.2f} mm")
-        st.metric("c (selected)", f"{c_selected:.2f} mm")
-        st.metric("c/d ratio", f"{(c_selected/d):.3f}")
-    else:
-        st.metric("x (selected)", f"{x_selected:.2f} mm")
-        st.metric("x/d ratio", f"{(x_selected/d):.3f}")
-
-with col2:
-    st.markdown("**⚡ Strain Analysis**")
-    if design_code == "ACI 318":
-        st.metric("εs (selected)", f"{es_selected:.5f}")
-        
-        if es_selected >= 0.005:
-            st.success("✓ Tension Controlled")
-        elif es_selected >= 0.002:
-            st.warning("⚠ Transition Zone")
+        if check_capacity:
+            st.success(f"✓ Capacity Check\nMn = {Mn_selected:.2f} kN.m")
         else:
-            st.error("✗ Compression Controlled")
-    else:
-        x_d_selected = x_selected / d
-        st.metric("x/d (selected)", f"{x_d_selected:.3f}")
-        
-        if x_d_selected <= 0.45:
-            st.success("✓ Within ECP Limits")
-        else:
-            st.error("✗ Exceeds ECP Limits")
-
-with col3:
-    st.markdown("**🎯 Final Status**")
-    if design_code == "ACI 318":
-        final_safe = check_As and check_capacity and (es_selected >= 0.002)
-    else:
-        final_safe = check_As and check_capacity and (x_d_selected <= 0.45)
-    
-    if final_safe:
-        st.success("### ✅ SELECTED CONFIG IS SAFE")
-    else:
-        st.error("### ❌ SELECTED CONFIG FAILED")
-    
-    if design_code == "ACI 318":
-        st.metric("Utilization", f"{(Mu/phi_Mn_selected)*100:.1f}%")
-    else:
-        st.metric("Utilization", f"{(Mu/Mn_selected)*100:.1f}%")
+            st.error(f"✗ Capacity Check\nMn = {Mn_selected:.2f} kN.m")
 
 # Rebar Table
 st.markdown("---")
-st.markdown("### 📋 Complete Rebar Area Table")
+st.markdown("### Complete Rebar Area Table")
 
 df_data = []
 for diameter, areas in rebar_data.items():
     row = [diameter] + areas
     df_data.append(row)
 
-df = pd.DataFrame(df_data, columns=['Ø (mm)', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
-df = df.set_index('Ø (mm)')
-
+df = pd.DataFrame(df_data, columns=["Ø (mm)", "1", "2", "3", "4", "5", "6", "7", "8", "9"]).set_index("Ø (mm)")
 st.dataframe(df, use_container_width=True)
-st.caption("📝 Note: All areas in mm²")
+st.caption("Note: All areas in mm²")
 
 # Footer
 st.markdown("---")
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.caption(f"🏗️ **Code**: {design_code}")
-with col2:
-    st.caption("📐 **Type**: Rectangular Beam")
-with col3:
-    st.caption("🔧 **Analysis**: Flexural Design")
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.caption(f"Code: {design_code}")
+with c2:
+    st.caption("Type: Rectangular Beam")
+with c3:
+    st.caption("Analysis: Flexural Design")
