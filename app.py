@@ -51,6 +51,12 @@ st.markdown("""
     .katex {
         font-size: 0.95em;
     }
+    /* Sync input styling */
+    .sync-container {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -73,10 +79,9 @@ rebar_data = {
     50: [1963.5, 3928, 5892, 7856, 9820, 11784, 13748, 15712, 17676]
 }
 
-# Initialize session state
+# Initialize session state with default values
 if 'initialized' not in st.session_state:
     st.session_state.initialized = True
-    # Default values
     st.session_state.fy = 420.0
     st.session_state.fcu = 25.0
     st.session_state.Mu = 100.0
@@ -98,7 +103,6 @@ def clear_all_inputs():
     st.session_state.phi = 0.0
     st.session_state.jd = 0.0
     st.session_state.beta1 = 0.0
-    st.rerun()
 
 # Title
 st.markdown('<h1 class="main-header">🏗️ RC Section Design (ACI/ECP)</h1>', unsafe_allow_html=True)
@@ -121,6 +125,19 @@ if st.sidebar.button("🗑️ Clear All Inputs", type="secondary", use_container
 
 st.sidebar.markdown("---")
 
+# Callback functions for syncing
+def sync_from_number(key):
+    """Update session state from number input"""
+    number_key = f"{key}_number"
+    if number_key in st.session_state:
+        st.session_state[key] = st.session_state[number_key]
+
+def sync_from_slider(key):
+    """Update session state from slider"""
+    slider_key = f"{key}_slider"
+    if slider_key in st.session_state:
+        st.session_state[key] = st.session_state[slider_key]
+
 # Helper function for synchronized input
 def sync_input(label, min_val, max_val, step, key, unit="", help_text=None):
     """Create synchronized number input and slider"""
@@ -128,39 +145,38 @@ def sync_input(label, min_val, max_val, step, key, unit="", help_text=None):
     
     col1, col2 = st.sidebar.columns([1, 1])
     
+    # Get current value from session state
+    current_value = st.session_state.get(key, min_val)
+    
     with col1:
-        num_val = st.number_input(
-            f"{key}_num",
+        st.number_input(
+            f"Number",
             min_value=min_val,
             max_value=max_val,
-            value=st.session_state.get(key, min_val),
+            value=current_value,
             step=step,
             key=f"{key}_number",
             label_visibility="collapsed",
-            help=help_text
+            help=help_text,
+            on_change=sync_from_number,
+            args=(key,)
         )
     
     with col2:
-        slider_val = st.slider(
-            f"{key}_slider",
+        st.slider(
+            f"Slider",
             min_value=min_val,
             max_value=max_val,
-            value=st.session_state.get(key, min_val),
+            value=current_value,
             step=step,
             key=f"{key}_slider",
             label_visibility="collapsed",
-            help=help_text
+            help=help_text,
+            on_change=sync_from_slider,
+            args=(key,)
         )
     
-    # Sync logic
-    if num_val != st.session_state.get(key, min_val):
-        st.session_state[key] = num_val
-        st.rerun()
-    elif slider_val != st.session_state.get(key, min_val):
-        st.session_state[key] = slider_val
-        st.rerun()
-    
-    return st.session_state.get(key, min_val)
+    return current_value
 
 # Material Properties
 st.sidebar.subheader("Material Properties")
@@ -235,8 +251,11 @@ if design_code == "ACI 318":
         "Stress block factor (typically 0.85 for f'c ≤ 28 MPa)"
     )
 else:  # Egyptian Code
-    # For Egyptian Code, we don't need phi, jd, beta1 in the same way
     st.sidebar.info("📘 Egyptian Code parameters are calculated automatically")
+    # Set dummy values for compatibility
+    phi = 1.0
+    jd = 0.9
+    beta1 = 0.85
 
 # Validation
 all_inputs_valid = all([
@@ -460,14 +479,6 @@ try:
         })
         
         # Step 2: Calculate C1
-        # C1 = J / √(fcu * b)
-        # But we need to find J first through iteration
-        # Let's assume initial J for C1 calculation
-        
-        # Step 2a: Calculate C1 from Mu
-        # Mu = fcu * b * d² * C1
-        # C1 = Mu / (fcu * b * d²)
-        
         C1_from_moment = Mu_Nmm / (fcu * b * d * d)
         
         calculations.append({
@@ -493,8 +504,6 @@ try:
         })
         
         # Step 4: Calculate J (lever arm factor)
-        # J = (1/1.15) * (0.5 + √(0.25 - 1/(0.9 * C1²)))
-        
         discriminant = 0.25 - 1/(0.9 * C1_from_moment * C1_from_moment)
         
         if discriminant < 0:
@@ -526,8 +535,6 @@ try:
         })
         
         # Step 6: Calculate required As
-        # As = Mu / (fy * J * d)
-        
         As_calculated = Mu_Nmm / (fy * J_used * d)
         
         calculations.append({
@@ -540,9 +547,6 @@ try:
         })
         
         # Step 7: Minimum steel (Egyptian Code)
-        # As,min = 0.6/fy * b * d (for grade 360/520)
-        # or As,min = 0.225 * √fcu / fy * b * d
-        
         As_min_1 = (0.6 / fy) * b * d
         As_min_2 = (0.225 * math.sqrt(fcu) / fy) * b * d
         As_min = max(As_min_1, As_min_2)
@@ -570,8 +574,6 @@ try:
         })
         
         # Step 9: Calculate actual neutral axis
-        # x = As * fy / (0.67 * fcu * b)  (for Egyptian Code)
-        
         x = (As_required * fy) / (0.67 * fcu * b)
         
         calculations.append({
@@ -585,7 +587,7 @@ try:
         
         # Step 10: Check x/d ratio
         x_d_ratio = x / d
-        x_d_limit = 0.45  # Egyptian Code limit
+        x_d_limit = 0.45
         x_d_safe = x_d_ratio <= x_d_limit
         
         calculations.append({
@@ -598,8 +600,6 @@ try:
         })
         
         # Step 11: Calculate design capacity
-        # Mn = As * fy * (d - 0.4*x)  (Egyptian Code)
-        
         Mn_Nmm = As_required * fy * (d - 0.4 * x)
         Mn = Mn_Nmm / 1e6
         
@@ -612,7 +612,7 @@ try:
             'variable': 'Mn'
         })
         
-        # Step 12: Capacity check (with safety factor γ = 1.15 for Egyptian Code)
+        # Step 12: Capacity check
         gamma_s = 1.15
         Mu_design = Mu * gamma_s
         capacity_safe = Mn >= Mu_design
@@ -628,12 +628,12 @@ try:
         })
         
         # Set variables for later use
-        strain_safe = x_d_safe  # For Egyptian Code
+        strain_safe = x_d_safe
         strain_status = "Within limits ✓" if x_d_safe else "Over-reinforced ✗"
-        phi_Mn = Mn  # For compatibility with display
-        c = x  # For compatibility
-        es = 0.003 * (d - x) / x if x > 0 else 0  # Approximate strain
-        a_final = x  # For compatibility
+        phi_Mn = Mn
+        c = x
+        es = 0.003 * (d - x) / x if x > 0 else 0
+        a_final = x
 
 except ZeroDivisionError:
     st.error("❌ Calculation Error: Division by zero detected. Please check your inputs.")
